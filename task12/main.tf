@@ -31,6 +31,6 @@ resource "google_compute_instance" "vm_instance" {
 
   network_interface {
     network = google_compute_network.vpc_network.self_link
-    access_config {} # needed for external IP
+    access_config {} 
   }
 }
