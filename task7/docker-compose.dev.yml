@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  app:
+    env_file: .env.dev
+
+  db:
+    image: mysql:8.0
+    container_name: mysql-db
+    ports:
+      - "3306:3306"
+    env_file: .env.dev.db
+    volumes:
+      - db-data-dev:/var/lib/mysql
+    networks:
+      - app-net
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
