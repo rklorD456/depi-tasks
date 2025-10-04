@@ -14,6 +14,6 @@ crash.log
 # Lock files
 .terraform.lock.hcl
 
-
-task11/spring-petclinic/
+task11/spring-petclinic/.git/
+task11/spring-petclinic/.github/
 task7/spring-petclinic/
