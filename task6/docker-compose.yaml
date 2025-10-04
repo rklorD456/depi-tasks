@@ -1,0 +1,42 @@
+# Use version 3.8 of Docker Compose
+version: "3.8"
+
+services:
+  my-app:
+    build: ./spring-petclinic
+    container_name: my-app
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - my-network
+
+  # The database service
+  db:
+    image: postgres:15
+    container_name: postgres-db
+    env_file:
+      - .env.db
+    ports:
+      - "5432:5432"
+    networks:
+      - my-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d mydb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Define the networks
+networks:
+  my-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
