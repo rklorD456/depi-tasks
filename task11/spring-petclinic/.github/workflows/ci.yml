@@ -1,0 +1,114 @@
+name: CI - Spring Petclinic with Ngrok
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  
+  workflow_dispatch:
+    inputs:
+      ngrok_duration:
+        description: 'How long to keep ngrok alive (seconds)'
+        required: false
+        default: '180'
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Java
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # 3. Cache Maven dependencies
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2
+
+      # 4. Build with Maven
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+
+      # 5. Install ngrok & jq
+      - name: Install ngrok
+        run: |
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt update && sudo apt install -y ngrok jq
+
+      # 6. Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 7. Build Docker image
+      - name: Build Docker Image
+        run: |
+          cp target/spring-petclinic-*.jar app.jar
+          docker build -t spring-petclinic .
+
+      # 8. Run the container locally
+      - name: Run Spring Petclinic Container
+        run: |
+          docker run -d -p 8080:8080 --name petclinic spring-petclinic
+          echo "Waiting for app to start..."
+          sleep 20
+          docker ps
+
+      # 9. Start ngrok tunnel for Spring Petclinic (8080)
+      - name: Start ngrok tunnel for App
+        env:
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        run: |
+          ngrok config add-authtoken $NGROK_AUTHTOKEN
+          nohup ngrok http 8080 > ngrok.log 2>&1 &
+          echo "Waiting for ngrok to start..."
+          sleep 5
+          NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[0].public_url')
+          echo "🔗 App is publicly accessible at: $NGROK_URL"
+          echo "APP_URL=$NGROK_URL" >> $GITHUB_ENV
+
+      # 10. Keep ngrok alive for 3 minutes (adjust as needed)
+      - name: Keep ngrok alive
+        run: |
+          echo "Keeping ngrok alive for ${{ github.event.inputs.ngrok_duration }} seconds..."
+          sleep ${{ github.event.inputs.ngrok_duration }}
+
+
+      - name: Send Slack Notification
+        if: always() # run even if the job fails
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            MESSAGE="✅ $WORKFLOW_NAME succeeded on branch $BRANCH!"
+          else
+            MESSAGE="❌ $WORKFLOW_NAME failed on branch $BRANCH!"
+          fi
+
+          # Use printf to safely build JSON payload
+          PAYLOAD=$(printf '{"text":"%s"}' "$MESSAGE")
+
+          curl -X POST -H 'Content-type: application/json' \
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK_URL"
+
+          
+      # 11. Show container logs if job fails
+      - name: Show Docker Logs
+        if: failure()
+        run: docker logs petclinic
